@@ -16,6 +16,14 @@ on:
         options:
           - 'false'
           - 'true'
+      debug:
+        description: 'Debug — dumps page HTML and screenshots when rows are not found'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 jobs:
   scrape:
@@ -52,12 +60,15 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           RECIPIENT_EMAIL:    ${{ vars.RECIPIENT_EMAIL || 'ijdietrich@wisc.edu' }}
           DRY_RUN:            ${{ github.event.inputs.dry_run || 'false' }}
+          DEBUG:              ${{ github.event.inputs.debug || 'false' }}
         run: python scraper.py
 
-      - name: Upload email preview (dry run only)
-        if: ${{ github.event.inputs.dry_run == 'true' }}
+      - name: Upload debug artifacts
+        if: ${{ always() && github.event.inputs.debug == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: email-preview-${{ github.run_id }}
-          path: email_preview.html
+          name: debug-${{ github.run_id }}
+          path: |
+            debug_*.png
+            email_preview.html
           retention-days: 7

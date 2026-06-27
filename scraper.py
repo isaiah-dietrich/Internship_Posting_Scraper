@@ -25,6 +25,22 @@ RECIPIENT_EMAIL    = os.environ.get("RECIPIENT_EMAIL", "ijdietrich@wisc.edu")
 GMAIL_USER         = os.environ.get("GMAIL_USER", "")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 DRY_RUN            = os.environ.get("DRY_RUN", "false").lower() == "true"
+DEBUG              = os.environ.get("DEBUG", "false").lower() == "true"
+
+# Ordered list of CSS selectors to try for table rows (most specific first)
+ROW_SELECTORS = [
+    "table tbody tr",
+    "[role='grid'] [role='row']:not([role='columnheader'])",
+    "[role='rowgroup'] [role='row']",
+    ".w-dyn-items > .w-dyn-item",          # Webflow collection items
+    ".collection-list > .collection-item",
+    "[data-automation-id='row']",
+    ".table-body .table-row",
+    ".tbody .tr",
+    ".job-row",
+    ".listing-row",
+    ".posting-row",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -32,7 +48,6 @@ DRY_RUN            = os.environ.get("DRY_RUN", "false").lower() == "true"
 # ---------------------------------------------------------------------------
 
 def is_within_last_day(date_str: str) -> bool:
-    """Return True if the date string represents a posting from the last 24 hours."""
     s = date_str.lower().strip()
     if not s or s in ("just now", "moments ago", "a moment ago"):
         return True
@@ -50,30 +65,67 @@ def is_within_last_day(date_str: str) -> bool:
 
 
 def is_valid_hire_time(hire_time: str) -> bool:
-    """Return True for Summer 2027 or blank/unspecified hire times."""
     ht = hire_time.strip().lower()
     blank = ht in ("", "n/a", "na", "-", "—", "not specified", "tbd")
-    return blank or "summer 2027" in ht
+    match = (
+        "summer 2027" in ht
+        or "2027-summer" in ht
+        or ht == "2027"
+    )
+    return blank or match
 
 
 # ---------------------------------------------------------------------------
 # Playwright helpers
 # ---------------------------------------------------------------------------
 
+# Masks navigator.webdriver so the site doesn't detect headless Chrome
+STEALTH_SCRIPT = """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+window.chrome = { runtime: {} };
+"""
+
+
+async def debug_dump(page: Page, label: str) -> None:
+    """Print page title + first 3000 chars of body HTML, and save a screenshot."""
+    title = await page.title()
+    body_html = await page.inner_html("body")
+    print(f"\n--- DEBUG [{label}] ---")
+    print(f"Title: {title}")
+    print(f"URL:   {page.url}")
+    print(f"Body HTML (first 3000 chars):\n{body_html[:3000]}")
+    print("--- END DEBUG ---\n")
+    slug = re.sub(r"[^a-z0-9]", "_", label.lower())
+    await page.screenshot(path=f"debug_{slug}.png", full_page=False)
+    print(f"Screenshot saved: debug_{slug}.png")
+
+
+async def find_row_selector(page: Page) -> str | None:
+    """Try each known row selector and return the first one that finds elements."""
+    for sel in ROW_SELECTORS:
+        try:
+            count = await page.locator(sel).count()
+            if count > 0:
+                print(f"  Found rows with selector: {sel!r} ({count} elements)")
+                return sel
+        except Exception:
+            continue
+    return None
+
+
 async def try_enable_hire_time_column(page: Page) -> None:
-    """Best-effort attempt to enable the Hire Time column via Edit Columns UI."""
     try:
         btn = page.get_by_role("button", name=re.compile(r"edit columns", re.IGNORECASE))
         if not await btn.count():
             return
         await btn.click()
         await page.wait_for_timeout(700)
-
         hire_opt = page.get_by_text("Hire Time", exact=True).first
         if await hire_opt.count():
             await hire_opt.click()
             await page.wait_for_timeout(400)
-
         await page.keyboard.press("Escape")
         await page.wait_for_timeout(400)
     except Exception:
@@ -81,39 +133,76 @@ async def try_enable_hire_time_column(page: Page) -> None:
 
 
 async def get_column_map(page: Page) -> dict[str, int]:
-    """Return a mapping of lowercase column name -> cell index."""
+    """
+    Build a column-name -> index map.
+    Works for both <table> headers and ARIA/div-based headers.
+    """
+    # Standard table header
     headers = await page.query_selector_all("table thead tr th, table thead tr td")
-    return {(await h.inner_text()).strip().lower(): i for i, h in enumerate(headers)}
+    if headers:
+        return {(await h.inner_text()).strip().lower(): i for i, h in enumerate(headers)}
+
+    # ARIA grid header row
+    headers = await page.query_selector_all(
+        "[role='columnheader'], [role='grid'] [role='row']:first-child [role='cell']"
+    )
+    if headers:
+        return {(await h.inner_text()).strip().lower(): i for i, h in enumerate(headers)}
+
+    return {}
+
+
+async def get_row_cells(row) -> list:
+    """Return the list of cell elements for a row, regardless of element type."""
+    # Standard table cells
+    cells = await row.query_selector_all("td")
+    if cells:
+        return cells
+    # ARIA / div cells
+    cells = await row.query_selector_all("[role='cell'], [role='gridcell']")
+    if cells:
+        return cells
+    # Generic divs / spans as columns (last resort)
+    cells = await row.query_selector_all("div[class], span[class]")
+    return cells
 
 
 async def scrape_category(page: Page, url: str, name: str) -> list[dict]:
-    """Scrape all postings from the last 24 hours for one category URL."""
-    print(f"Scraping {name} ...")
+    print(f"\nScraping {name} ...")
 
     try:
         await page.goto(url, wait_until="networkidle", timeout=60000)
     except Exception:
         await page.goto(url, timeout=60000)
 
-    await page.wait_for_timeout(2000)
+    await page.wait_for_timeout(3000)
     await try_enable_hire_time_column(page)
 
-    try:
-        await page.wait_for_selector("table tbody tr", timeout=15000)
-    except Exception:
-        print(f"  No table found for {name}")
+    # Find which selector works for this page
+    row_sel = await find_row_selector(page)
+    if not row_sel:
+        print(f"  No rows found for {name} — trying extended wait...")
+        await page.wait_for_timeout(5000)
+        row_sel = await find_row_selector(page)
+
+    if not row_sel:
+        print(f"  Still no rows found for {name}")
+        if DEBUG:
+            await debug_dump(page, name)
+        else:
+            print("  Re-run with DEBUG=true for HTML dump and screenshot")
         return []
 
     jobs: list[dict] = []
     seen_count = 0
     stop = False
 
-    for _ in range(200):  # max scroll iterations
+    for _ in range(200):
         col = await get_column_map(page)
-        rows = await page.query_selector_all("table tbody tr")
+        rows = await page.locator(row_sel).all()
 
         for row in rows[seen_count:]:
-            cells = await row.query_selector_all("td")
+            cells = await get_row_cells(row)
             if not cells:
                 continue
 
@@ -132,11 +221,11 @@ async def scrape_category(page: Page, url: str, name: str) -> list[dict]:
             if not is_valid_hire_time(hire_time):
                 continue
 
-            title     = await cell("position title", 0)
-            company   = await cell("company", 5)
-            location  = await cell("location", 4)
+            title      = await cell("position title", 0)
+            company    = await cell("company", 5)
+            location   = await cell("location", 4)
             work_model = await cell("work model", 3)
-            salary    = await cell("salary", 6)
+            salary     = await cell("salary", 6)
 
             apply_link = ""
             apply_idx = col.get("apply", 2)
@@ -157,7 +246,7 @@ async def scrape_category(page: Page, url: str, name: str) -> list[dict]:
                     "apply_link": apply_link,
                 })
 
-        seen_count = len(await page.query_selector_all("table tbody tr"))
+        seen_count = await page.locator(row_sel).count()
 
         if stop:
             break
@@ -167,7 +256,7 @@ async def scrape_category(page: Page, url: str, name: str) -> list[dict]:
         await page.wait_for_timeout(1500)
         new_height = await page.evaluate("document.body.scrollHeight")
         if new_height == prev_height:
-            break  # No new content loaded — reached the end
+            break
 
     print(f"  → {len(jobs)} matching posting(s)")
     return jobs
@@ -205,22 +294,10 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
     font-size: 14px;
   }}
   table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px; }}
-  th {{
-    background: #0f3460;
-    color: #fff;
-    padding: 10px 14px;
-    text-align: left;
-    font-weight: 600;
-  }}
+  th {{ background: #0f3460; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; }}
   td {{ padding: 9px 14px; border-bottom: 1px solid #e4e8f0; vertical-align: middle; }}
   tr:nth-child(even) td {{ background: #f5f7ff; }}
-  .badge {{
-    display: inline-block;
-    padding: 3px 9px;
-    border-radius: 12px;
-    font-size: 11px;
-    font-weight: 600;
-  }}
+  .badge {{ display: inline-block; padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; }}
   .remote  {{ background: #d4f5d4; color: #1a6e1a; }}
   .onsite  {{ background: #ffd4d4; color: #8a1a1a; }}
   .hybrid  {{ background: #d4e8ff; color: #1a4a8a; }}
@@ -261,43 +338,28 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
             continue
 
         html += (
-            "<table>\n"
-            "<thead><tr>"
-            "<th>#</th>"
-            "<th>Position Title</th>"
-            "<th>Company</th>"
-            "<th>Location</th>"
-            "<th>Work Model</th>"
-            "<th>Apply</th>"
+            "<table>\n<thead><tr>"
+            "<th>#</th><th>Position Title</th><th>Company</th>"
+            "<th>Location</th><th>Work Model</th><th>Apply</th>"
             "</tr></thead>\n<tbody>\n"
         )
 
         for i, j in enumerate(jobs, 1):
             wm = j["work_model"].lower()
-            if "remote" in wm:
-                cls = "remote"
-            elif "on" in wm and "site" in wm:
-                cls = "onsite"
-            elif "hybrid" in wm:
-                cls = "hybrid"
-            else:
-                cls = ""
-
+            cls = (
+                "remote" if "remote" in wm else
+                "onsite" if "on" in wm and "site" in wm else
+                "hybrid" if "hybrid" in wm else ""
+            )
             badge = f'<span class="badge {cls}">{j["work_model"]}</span>' if cls else j["work_model"]
             apply_cell = (
                 f'<a class="apply-btn" href="{j["apply_link"]}" target="_blank">Apply &rarr;</a>'
                 if j["apply_link"] else "&mdash;"
             )
-
             html += (
-                f"<tr>"
-                f"<td>{i}</td>"
-                f"<td><strong>{j['title']}</strong></td>"
-                f"<td>{j['company']}</td>"
-                f"<td>{j['location']}</td>"
-                f"<td>{badge}</td>"
-                f"<td>{apply_cell}</td>"
-                f"</tr>\n"
+                f"<tr><td>{i}</td><td><strong>{j['title']}</strong></td>"
+                f"<td>{j['company']}</td><td>{j['location']}</td>"
+                f"<td>{badge}</td><td>{apply_cell}</td></tr>\n"
             )
 
         html += "</tbody>\n</table>\n"
@@ -305,8 +367,7 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
     html += (
         f'<div class="footer">'
         f'Scraped from <a href="https://intern-list.com">intern-list.com</a> &bull; {date_str}'
-        f"</div>\n"
-        f"</body></html>"
+        f"</div>\n</body></html>"
     )
     return html
 
@@ -350,6 +411,8 @@ async def main() -> None:
             ),
             viewport={"width": 1440, "height": 900},
         )
+        # Mask headless indicators
+        await ctx.add_init_script(STEALTH_SCRIPT)
         page = await ctx.new_page()
 
         for name, url in CATEGORIES.items():
