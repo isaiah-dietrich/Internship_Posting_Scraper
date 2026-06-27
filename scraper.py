@@ -162,8 +162,12 @@ async def get_row_cells(row) -> list:
     cells = await row.query_selector_all("[role='cell'], [role='gridcell']")
     if cells:
         return cells
-    # Generic divs / spans as columns (last resort)
-    cells = await row.query_selector_all("div[class], span[class]")
+    # Webflow: direct child divs and links (each = one column)
+    cells = await row.query_selector_all(":scope > div, :scope > a")
+    if cells:
+        return cells
+    # Broader fallback: any direct children
+    cells = await row.query_selector_all(":scope > *")
     return cells
 
 
@@ -199,7 +203,11 @@ async def scrape_category(page: Page, url: str, name: str) -> list[dict]:
 
     for _ in range(200):
         col = await get_column_map(page)
-        rows = await page.locator(row_sel).all()
+        rows = await page.query_selector_all(row_sel)
+
+        if DEBUG and seen_count == 0 and rows:
+            first_html = await rows[0].inner_html()
+            print(f"\n--- FIRST ROW HTML ---\n{first_html[:2000]}\n--- END ---\n")
 
         for row in rows[seen_count:]:
             cells = await get_row_cells(row)
@@ -246,7 +254,7 @@ async def scrape_category(page: Page, url: str, name: str) -> list[dict]:
                     "apply_link": apply_link,
                 })
 
-        seen_count = await page.locator(row_sel).count()
+        seen_count = len(await page.query_selector_all(row_sel))
 
         if stop:
             break
