@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Internship postings scraper for intern-list.com.
-The site loads job data into an Airtable iframe when a category button is clicked.
-This scraper clicks each category, waits for the iframe, then scrapes within it.
+Internship postings scraper.
+Navigates directly to jobright.ai embed URLs (the underlying data source for intern-list.com),
+filters by posting date and hire time, and sends an HTML email digest.
 """
 
 import asyncio
@@ -13,14 +13,13 @@ from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-from playwright.async_api import async_playwright, Page, Frame
+from playwright.async_api import async_playwright, Page
 
-# Category name -> (page URL, short-link attribute value on the trigger button)
 CATEGORIES = {
-    "Product Management": ("https://www.intern-list.com/?k=pm", "pm"),
-    "Cybersecurity":      ("https://www.intern-list.com/?k=cs", "cs"),
-    "Consulting":         ("https://www.intern-list.com/?k=cst", "cst"),
-    "Business Analyst":   ("https://www.intern-list.com/?k=ba", "ba"),
+    "Product Management": "https://jobright.ai/minisites-jobs/intern/us/product_management",
+    "Cybersecurity":      "https://jobright.ai/minisites-jobs/intern/us/cyber_security",
+    "Consulting":         "https://jobright.ai/minisites-jobs/intern/us/consulting",
+    "Business Analyst":   "https://jobright.ai/minisites-jobs/intern/us/business_analyst",
 }
 
 RECIPIENT_EMAIL    = os.environ.get("RECIPIENT_EMAIL", "ijdietrich@wisc.edu")
@@ -29,13 +28,21 @@ GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 DRY_RUN            = os.environ.get("DRY_RUN", "false").lower() == "true"
 DEBUG              = os.environ.get("DEBUG", "false").lower() == "true"
 
-# Airtable row selectors to try (most specific first)
-AIRTABLE_ROW_SELECTORS = [
+# Ordered list of row selectors to try
+ROW_SELECTORS = [
     "table tbody tr",
+    "[role='row']:not([role='columnheader'])",
+    "[role='rowgroup'] [role='row']",
     ".ant-table-row",
-    "[data-rowindex]",
-    "[role='row']:not([aria-rowindex='1'])",
-    "tr",
+    "[class*='jobCard']",
+    "[class*='job-card']",
+    "[class*='JobCard']",
+    "[class*='job-item']",
+    "[class*='JobItem']",
+    "[class*='job-row']",
+    "[class*='listItem']",
+    "[class*='list-item']",
+    "li[class*='job']",
 ]
 
 
@@ -72,146 +79,100 @@ def is_valid_hire_time(hire_time: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Stealth / anti-bot
+# Playwright helpers
 # ---------------------------------------------------------------------------
 
 STEALTH_SCRIPT = """
 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+Object.defineProperty(navigator, 'plugins',   { get: () => [1, 2, 3] });
 Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
 window.chrome = { runtime: {} };
 """
 
 
-# ---------------------------------------------------------------------------
-# Iframe handling
-# ---------------------------------------------------------------------------
-
-async def get_airtable_frame(page: Page, short_link: str):
-    """
-    Return the content Frame of the Airtable iframe on the page.
-    If the URL parameter didn't trigger auto-load, clicks the category button first.
-    """
-    # Give the page time to auto-load the iframe based on the URL ?k= param
-    await page.wait_for_timeout(4000)
-
-    iframe_el = await page.query_selector("iframe[src*='airtable.com']")
-
-    if not iframe_el:
-        # Try clicking the matching category trigger button
-        trigger = page.locator(f"[short-link='{short_link}']").first
-        if await trigger.count():
-            await trigger.click()
-            print(f"  Clicked category trigger for short-link={short_link!r}")
-            await page.wait_for_timeout(5000)
-            iframe_el = await page.query_selector("iframe[src*='airtable.com']")
-
-    if not iframe_el:
-        # Last resort: any iframe on the page
-        all_iframes = await page.query_selector_all("iframe")
-        print(f"  No Airtable iframe found. Total iframes on page: {len(all_iframes)}")
-        for el in all_iframes:
-            src = await el.get_attribute("src") or "(no src)"
-            print(f"    iframe src: {src[:120]}")
-        if DEBUG:
-            await page.screenshot(path=f"debug_{short_link}_page.png", full_page=False)
-            body = await page.inner_html("body")
-            print(f"\n--- PAGE BODY HTML (first 4000 chars) ---\n{body[:4000]}\n---\n")
-        return None
-
-    src = await iframe_el.get_attribute("src") or ""
-    print(f"  Airtable iframe: {src[:100]}")
-
-    frame = await iframe_el.content_frame()
-    return frame
-
-
-# ---------------------------------------------------------------------------
-# Airtable frame scraping
-# ---------------------------------------------------------------------------
-
-async def find_airtable_row_selector(frame: Frame) -> str | None:
-    """Wait for Airtable to load and return the first working row selector."""
-    try:
-        await frame.wait_for_load_state("domcontentloaded", timeout=20000)
-    except Exception:
-        pass
-    await frame.wait_for_timeout(3000)
-
-    for sel in AIRTABLE_ROW_SELECTORS:
+async def find_row_selector(page: Page) -> str | None:
+    for sel in ROW_SELECTORS:
         try:
-            count = await frame.locator(sel).count()
+            count = await page.locator(sel).count()
             if count > 0:
-                print(f"  Airtable row selector: {sel!r} ({count} rows)")
+                print(f"  Row selector: {sel!r} ({count} elements)")
                 return sel
         except Exception:
             continue
     return None
 
 
-async def get_airtable_column_map(frame: Frame) -> dict[str, int]:
-    """Build column-name → index map from the Airtable header row."""
-    header_selectors = [
+async def get_column_map(page: Page) -> dict[str, int]:
+    """Return lowercase column-name → index from any header variant."""
+    for sel in [
         "table thead tr th",
+        "table thead tr td",
         "[role='columnheader']",
         "[aria-rowindex='1'] [role='cell']",
-        "thead td",
-    ]
-    for sel in header_selectors:
-        headers = await frame.query_selector_all(sel)
+    ]:
+        headers = await page.query_selector_all(sel)
         if headers:
             return {(await h.inner_text()).strip().lower(): i for i, h in enumerate(headers)}
     return {}
 
 
-async def scrape_airtable_frame(frame: Frame, name: str) -> list[dict]:
-    """Scrape job rows from within the Airtable iframe."""
+async def get_row_cells(row) -> list:
+    cells = await row.query_selector_all("td")
+    if cells:
+        return cells
+    cells = await row.query_selector_all("[role='cell'], [role='gridcell']")
+    if cells:
+        return cells
+    cells = await row.query_selector_all(":scope > div, :scope > a")
+    if cells:
+        return cells
+    return await row.query_selector_all(":scope > *")
 
-    if DEBUG:
-        body = await frame.inner_html("body")
-        print(f"\n--- AIRTABLE IFRAME HTML (first 4000 chars) ---\n{body[:4000]}\n---\n")
-        await frame.screenshot(path=f"debug_{name.lower().replace(' ', '_')}_iframe.png")
 
-    row_sel = await find_airtable_row_selector(frame)
-    if not row_sel:
-        print(f"  No rows found in Airtable iframe for {name}")
-        return []
+# ---------------------------------------------------------------------------
+# Scraper
+# ---------------------------------------------------------------------------
 
-    # Try to enable Hire Time column via any "Edit Columns" / column controls
+async def scrape_category(page: Page, url: str, name: str) -> list[dict]:
+    print(f"\nScraping {name} ...")
+
     try:
-        edit_btn = frame.get_by_role("button", name=re.compile(r"edit columns|fields|columns", re.IGNORECASE))
-        if await edit_btn.count():
-            await edit_btn.first.click()
-            await frame.wait_for_timeout(600)
-            hire_opt = frame.get_by_text("Hire Time", exact=True).first
-            if await hire_opt.count():
-                await hire_opt.click()
-                await frame.wait_for_timeout(400)
-            await frame.keyboard.press("Escape")
-            await frame.wait_for_timeout(400)
+        await page.goto(url, wait_until="networkidle", timeout=60000)
     except Exception:
-        pass
+        await page.goto(url, timeout=60000)
+
+    await page.wait_for_timeout(3000)
+
+    row_sel = await find_row_selector(page)
+
+    if not row_sel:
+        print(f"  No rows found — trying extended wait ...")
+        await page.wait_for_timeout(5000)
+        row_sel = await find_row_selector(page)
+
+    if not row_sel:
+        print(f"  Still no rows found for {name}")
+        if DEBUG:
+            body = await page.inner_html("body")
+            print(f"\n--- PAGE BODY HTML (first 4000 chars) ---\n{body[:4000]}\n---\n")
+            await page.screenshot(path=f"debug_{name.lower().replace(' ', '_')}.png", full_page=False)
+        return []
 
     jobs: list[dict] = []
     seen_count = 0
     stop = False
 
     for scroll_iter in range(300):
-        col = await get_airtable_column_map(frame)
-        rows = await frame.query_selector_all(row_sel)
+        col = await get_column_map(page)
+        rows = await page.query_selector_all(row_sel)
 
         if DEBUG and scroll_iter == 0 and rows:
             first_html = await rows[0].inner_html()
-            print(f"\n--- FIRST AIRTABLE ROW HTML ---\n{first_html[:2000]}\n---\n")
-            col_map_display = dict(list(col.items())[:15])
-            print(f"Column map: {col_map_display}")
+            print(f"\n--- FIRST ROW HTML ---\n{first_html[:2000]}\n---\n")
+            print(f"Column map: {dict(list(col.items())[:15])}")
 
         for row in rows[seen_count:]:
-            cells = await row.query_selector_all("td")
-            if not cells:
-                cells = await row.query_selector_all("[role='cell'], [role='gridcell']")
-            if not cells:
-                cells = await row.query_selector_all(":scope > *")
+            cells = await get_row_cells(row)
             if not cells:
                 continue
 
@@ -255,40 +216,20 @@ async def scrape_airtable_frame(frame: Frame, name: str) -> list[dict]:
                     "apply_link": apply_link,
                 })
 
-        seen_count = len(await frame.query_selector_all(row_sel))
+        seen_count = len(await page.query_selector_all(row_sel))
 
         if stop:
             break
 
-        # Scroll within the Airtable iframe to load more rows
-        prev_height = await frame.evaluate("document.body.scrollHeight")
-        await frame.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        await frame.wait_for_timeout(1500)
-        new_height = await frame.evaluate("document.body.scrollHeight")
+        prev_height = await page.evaluate("document.body.scrollHeight")
+        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        await page.wait_for_timeout(1500)
+        new_height = await page.evaluate("document.body.scrollHeight")
         if new_height == prev_height:
             break
 
     print(f"  → {len(jobs)} matching posting(s)")
     return jobs
-
-
-# ---------------------------------------------------------------------------
-# Category scraper
-# ---------------------------------------------------------------------------
-
-async def scrape_category(page: Page, url: str, name: str, short_link: str) -> list[dict]:
-    print(f"\nScraping {name} ...")
-
-    try:
-        await page.goto(url, wait_until="networkidle", timeout=60000)
-    except Exception:
-        await page.goto(url, timeout=60000)
-
-    frame = await get_airtable_frame(page, short_link)
-    if frame is None:
-        return []
-
-    return await scrape_airtable_frame(frame, name)
 
 
 # ---------------------------------------------------------------------------
@@ -395,7 +336,7 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
 
     html += (
         f'<div class="footer">'
-        f'Scraped from <a href="https://intern-list.com">intern-list.com</a> &bull; {date_str}'
+        f'Scraped from <a href="https://intern-list.com">intern-list.com</a> via jobright.ai &bull; {date_str}'
         f"</div>\n</body></html>"
     )
     return html
@@ -443,8 +384,8 @@ async def main() -> None:
         await ctx.add_init_script(STEALTH_SCRIPT)
         page = await ctx.new_page()
 
-        for name, (url, short_link) in CATEGORIES.items():
-            jobs_by_cat[name] = await scrape_category(page, url, name, short_link)
+        for name, url in CATEGORIES.items():
+            jobs_by_cat[name] = await scrape_category(page, url, name)
 
         await browser.close()
 
