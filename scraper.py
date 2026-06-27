@@ -182,23 +182,23 @@ async def scrape_category(page: Page, url: str, name: str) -> list[dict]:
                     return ""
                 return (await cells[idx].inner_text()).strip()
 
-            date_str = await cell("date", 1)
+            date_str = await cell("date", 2)
             if not is_within_last_day(date_str):
                 stop = True
                 break
 
-            hire_time = await cell("hire time")
+            hire_time = await cell("hire time", 8)
             if not is_valid_hire_time(hire_time):
                 continue
 
-            title      = await cell("position title", 0)
-            company    = await cell("company", 5)
-            location   = await cell("location", 4)
-            work_model = await cell("work model", 3)
-            salary     = await cell("salary", 6)
+            title      = await cell("position title", 1)
+            company    = await cell("company", 6)
+            location   = await cell("location", 5)
+            work_model = await cell("work model", 4)
+            salary     = await cell("salary", 7)
 
             apply_link = ""
-            apply_idx = col.get("apply", 2)
+            apply_idx = col.get("apply", 3)
             if 0 <= apply_idx < len(cells):
                 a_tag = await cells[apply_idx].query_selector("a")
                 if a_tag:
