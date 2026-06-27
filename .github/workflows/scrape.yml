@@ -1,0 +1,63 @@
+name: Daily Internship Scraper
+
+on:
+  schedule:
+    # 9:00 AM CDT (UTC-5, summer) = 14:00 UTC
+    # If you need 9:00 AM CST (UTC-6, winter) change to: '0 15 * * *'
+    - cron: '0 14 * * *'
+
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run — generates email_preview.html without sending'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+jobs:
+  scrape:
+    name: Scrape & Email Internship Postings
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright + Chromium
+        run: playwright install chromium --with-deps
+
+      - name: Run scraper
+        env:
+          GMAIL_USER:         ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          RECIPIENT_EMAIL:    ${{ vars.RECIPIENT_EMAIL || 'ijdietrich@wisc.edu' }}
+          DRY_RUN:            ${{ github.event.inputs.dry_run || 'false' }}
+        run: python scraper.py
+
+      - name: Upload email preview (dry run only)
+        if: ${{ github.event.inputs.dry_run == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: email-preview-${{ github.run_id }}
+          path: email_preview.html
+          retention-days: 7
