@@ -366,11 +366,11 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
   }}
   th {{
     background: #0f3460; color: #fff;
-    padding: 5px 5px; text-align: left; font-weight: 600;
+    padding: 2px 3px; text-align: left; font-weight: 600;
     white-space: nowrap; overflow: hidden;
   }}
   td {{
-    padding: 4px 5px; border-bottom: 1px solid #e4e8f0;
+    padding: 1px 3px; border-bottom: 1px solid #e4e8f0;
     vertical-align: middle;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }}
