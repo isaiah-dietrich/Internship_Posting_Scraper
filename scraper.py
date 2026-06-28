@@ -360,7 +360,7 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
   .table-wrap {{ margin-bottom: 14px; }}
   table {{
     border-collapse: collapse;
-    font-size: 9px;
+    font-size: 5px;
     table-layout: fixed;
     width: 588px;
   }}
@@ -383,7 +383,7 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
   .col-salary   {{ width: 75px;  }}
   .col-hire     {{ width: 57px;  }}
   .col-apply    {{ width: 50px;  }}
-  .badge {{ display: inline-block; padding: 1px 5px; border-radius: 8px; font-size: 8px; font-weight: 600; }}
+  .badge {{ display: inline-block; padding: 1px 3px; border-radius: 4px; font-size: 4px; font-weight: 600; }}
   .remote  {{ background: #d4f5d4; color: #1a6e1a; }}
   .onsite  {{ background: #ffd4d4; color: #8a1a1a; }}
   .hybrid  {{ background: #d4e8ff; color: #1a4a8a; }}
@@ -392,9 +392,9 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
     background: #0f3460;
     color: #fff !important;
     text-decoration: none;
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-size: 8px;
+    padding: 1px 4px;
+    border-radius: 2px;
+    font-size: 4px;
     font-weight: 600;
     white-space: nowrap;
   }}
