@@ -67,6 +67,40 @@ def is_within_last_day(date_str: str) -> bool:
     return False
 
 
+def is_not_remote(work_model: str) -> bool:
+    """Returns False for purely remote jobs."""
+    return "remote" not in work_model.strip().lower()
+
+
+def meets_salary_threshold(salary: str) -> bool:
+    """
+    Returns True if salary is unknown/blank (can't determine — include)
+    or meets the $35/hr threshold.
+    Handles hourly ("$20/hr"), annual ("$72,000/yr"), and ambiguous values.
+    """
+    s = salary.strip().lower()
+    if not s or s in ("n/a", "na", "-", "—", "tbd", "not specified"):
+        return True
+    if "unpaid" in s:
+        return False
+
+    nums = [float(n.replace(",", "")) for n in re.findall(r"[\d,]+", s)]
+    if not nums:
+        return True  # Can't parse — include
+
+    max_val = max(nums)
+    is_hourly = "/hr" in s or "hour" in s or max_val < 500
+    is_annual = "/yr" in s or "year" in s or "annual" in s
+
+    if is_hourly:
+        return max_val >= 35
+    elif is_annual:
+        return (max_val / 2080) >= 35  # Convert annual → hourly
+    else:
+        # Large number without unit — treat as annual
+        return (max_val / 2080) >= 35 if max_val >= 10_000 else max_val >= 35
+
+
 def is_valid_hire_time(hire_time: str) -> bool:
     ht = hire_time.strip().lower()
     blank = ht in ("", "n/a", "na", "-", "—", "not specified", "tbd")
@@ -187,6 +221,14 @@ async def scrape_category(page: Page, url: str, name: str) -> list[dict]:
                 stop = True
                 break
 
+            work_model = await cell("work model", 4)
+            if not is_not_remote(work_model):
+                continue
+
+            salary = await cell("salary", 7)
+            if not meets_salary_threshold(salary):
+                continue
+
             hire_time = await cell("hire time", 8)
             if not is_valid_hire_time(hire_time):
                 continue
@@ -194,8 +236,6 @@ async def scrape_category(page: Page, url: str, name: str) -> list[dict]:
             title            = await cell("position title", 1)
             company          = await cell("company", 6)
             location         = await cell("location", 5)
-            work_model       = await cell("work model", 4)
-            salary           = await cell("salary", 7)
             graduate_time    = await cell("graduate time", 9)
             company_industry = await cell("company industry", 10)
             company_size     = await cell("company size", 11)
@@ -306,7 +346,7 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
 <h1>Internship Postings &mdash; {date_str}</h1>
 <div class="summary">
   <strong>{total} new posting{"s" if total != 1 else ""}</strong> matched your filters across {len(jobs_by_cat)} categories.<br>
-  <span style="color:#555">Criteria: posted within the last 24 hours &bull; Hire Time = Summer 2027 or unspecified</span>
+  <span style="color:#555">Criteria: posted within last 24h &bull; Hire Time = Summer 2027 or unspecified &bull; On-site / Hybrid only &bull; Salary &ge; $35/hr</span>
 </div>
 """
 
