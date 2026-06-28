@@ -103,9 +103,8 @@ def is_not_remote(work_model: str) -> bool:
 
 def meets_salary_threshold(salary: str) -> bool:
     """
-    Returns True if salary is unknown/blank (can't determine — include)
-    or meets the $35/hr threshold.
-    Handles hourly ("$20/hr"), annual ("$72,000/yr"), and ambiguous values.
+    Thresholds: $30/hr | $5,000/mo | $1,250/wk | $60,000/yr
+    N/A / blank → True (include).  Unpaid → False.
     """
     s = salary.strip().lower()
     if not s or s in ("n/a", "na", "-", "—", "tbd", "not specified"):
@@ -113,21 +112,33 @@ def meets_salary_threshold(salary: str) -> bool:
     if "unpaid" in s:
         return False
 
-    nums = [float(n.replace(",", "")) for n in re.findall(r"[\d,]+", s)]
+    nums = [float(n.replace(",", "")) for n in re.findall(r"[\d,]+(?:\.\d+)?", s)]
     if not nums:
-        return True  # Can't parse — include
+        return True
 
     max_val = max(nums)
-    is_hourly = "/hr" in s or "hour" in s or max_val < 500
-    is_annual = "/yr" in s or "year" in s or "annual" in s
+
+    is_hourly  = bool(re.search(r"/hr|/hour|\bhour\b|\bhourly\b", s))
+    is_monthly = bool(re.search(r"/mo(?:nth)?|\bmonth\b|\bmonthly\b", s))
+    is_weekly  = bool(re.search(r"/wk|/week|\bweek\b|\bweekly\b", s))
+    is_annual  = bool(re.search(r"/yr|/year|\byear\b|\bannual\b", s))
 
     if is_hourly:
-        return max_val >= 35
+        return max_val >= 30
+    elif is_monthly:
+        return max_val >= 5_000
+    elif is_weekly:
+        return max_val >= 1_250
     elif is_annual:
-        return (max_val / 2080) >= 35  # Convert annual → hourly
+        return max_val >= 60_000
     else:
-        # Large number without unit — treat as annual
-        return (max_val / 2080) >= 35 if max_val >= 10_000 else max_val >= 35
+        # Guess from magnitude
+        if max_val < 500:
+            return max_val >= 30       # looks hourly
+        elif max_val < 8_000:
+            return max_val >= 5_000    # looks monthly
+        else:
+            return max_val >= 60_000   # looks annual
 
 
 def is_valid_hire_time(hire_time: str) -> bool:
@@ -254,12 +265,9 @@ async def scrape_category(page: Page, url: str, name: str) -> list[dict]:
             if not is_not_remote(work_model):
                 continue
 
-            salary = await cell("salary", 7)
-            if not meets_salary_threshold(salary):
-                continue
-
+            salary  = await cell("salary", 7)
             company = await cell("company", 6)
-            if not is_approved_company(company):
+            if not (meets_salary_threshold(salary) or is_approved_company(company)):
                 continue
 
             hire_time = await cell("hire time", 8)
