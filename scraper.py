@@ -341,50 +341,49 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
 <style>
   body {{
     font-family: Arial, Helvetica, sans-serif;
-    max-width: 900px;
+    max-width: 620px;
     margin: 0 auto;
-    padding: 28px 24px;
+    padding: 16px;
     color: #1a1a2e;
     background: #fff;
   }}
-  h1  {{ color: #0f3460; border-bottom: 3px solid #0f3460; padding-bottom: 10px; margin-bottom: 20px; font-size: 22px; }}
-  h2  {{ color: #16213e; margin: 32px 0 8px; font-size: 17px; }}
+  h1  {{ color: #0f3460; border-bottom: 2px solid #0f3460; padding-bottom: 6px; margin-bottom: 12px; font-size: 15px; }}
+  h2  {{ color: #16213e; margin: 20px 0 4px; font-size: 12px; }}
   .summary {{
     background: #eef2ff;
-    border-left: 4px solid #0f3460;
-    padding: 14px 18px;
-    margin-bottom: 28px;
-    border-radius: 4px;
-    font-size: 14px;
+    border-left: 3px solid #0f3460;
+    padding: 8px 12px;
+    margin-bottom: 16px;
+    border-radius: 3px;
+    font-size: 10px;
   }}
-  .table-wrap {{ margin-bottom: 20px; }}
+  .table-wrap {{ margin-bottom: 14px; }}
   table {{
     border-collapse: collapse;
-    font-size: 11px;
+    font-size: 9px;
     table-layout: fixed;
-    width: 860px;
+    width: 588px;
   }}
   th {{
     background: #0f3460; color: #fff;
-    padding: 7px 8px; text-align: left; font-weight: 600;
+    padding: 5px 5px; text-align: left; font-weight: 600;
     white-space: nowrap; overflow: hidden;
   }}
   td {{
-    padding: 5px 8px; border-bottom: 1px solid #e4e8f0;
+    padding: 4px 5px; border-bottom: 1px solid #e4e8f0;
     vertical-align: middle;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }}
   tr:nth-child(even) td {{ background: #f5f7ff; }}
-  .col-num      {{ width: 28px;  }}
-  .col-title    {{ width: 215px; }}
-  .col-company  {{ width: 130px; }}
-  .col-location {{ width: 130px; }}
-  .col-model    {{ width: 80px;  }}
-  .col-salary   {{ width: 100px; }}
-  .col-hire     {{ width: 87px;  }}
-  .col-apply    {{ width: 65px;  }}
-  tr:nth-child(even) td {{ background: #f5f7ff; }}
-  .badge {{ display: inline-block; padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; }}
+  .col-num      {{ width: 16px;  }}
+  .col-title    {{ width: 150px; }}
+  .col-company  {{ width: 90px;  }}
+  .col-location {{ width: 90px;  }}
+  .col-model    {{ width: 55px;  }}
+  .col-salary   {{ width: 75px;  }}
+  .col-hire     {{ width: 57px;  }}
+  .col-apply    {{ width: 50px;  }}
+  .badge {{ display: inline-block; padding: 1px 5px; border-radius: 8px; font-size: 8px; font-weight: 600; }}
   .remote  {{ background: #d4f5d4; color: #1a6e1a; }}
   .onsite  {{ background: #ffd4d4; color: #8a1a1a; }}
   .hybrid  {{ background: #d4e8ff; color: #1a4a8a; }}
@@ -393,9 +392,9 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
     background: #0f3460;
     color: #fff !important;
     text-decoration: none;
-    padding: 5px 14px;
-    border-radius: 4px;
-    font-size: 12px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 8px;
     font-weight: 600;
     white-space: nowrap;
   }}
