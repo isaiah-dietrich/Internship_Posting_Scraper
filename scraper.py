@@ -357,10 +357,21 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
     border-radius: 4px;
     font-size: 14px;
   }}
-  .table-wrap {{ overflow-x: auto; margin-bottom: 20px; }}
-  table {{ width: 100%; border-collapse: collapse; font-size: 12px; white-space: nowrap; }}
-  th {{ background: #0f3460; color: #fff; padding: 9px 12px; text-align: left; font-weight: 600; white-space: nowrap; }}
-  td {{ padding: 8px 12px; border-bottom: 1px solid #e4e8f0; vertical-align: middle; }}
+  .table-wrap {{ margin-bottom: 20px; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 11px; table-layout: fixed; }}
+  th {{ background: #0f3460; color: #fff; padding: 7px 10px; text-align: left; font-weight: 600; white-space: nowrap; overflow: hidden; }}
+  td {{ padding: 6px 10px; border-bottom: 1px solid #e4e8f0; vertical-align: top; word-wrap: break-word; overflow-wrap: break-word; }}
+  tr:nth-child(even) td {{ background: #f5f7ff; }}
+  .col-num      {{ width: 28px; }}
+  .col-title    {{ width: 20%; }}
+  .col-company  {{ width: 12%; }}
+  .col-location {{ width: 13%; }}
+  .col-model    {{ width: 80px; }}
+  .col-salary   {{ width: 10%; }}
+  .col-hire     {{ width: 90px; }}
+  .col-industry {{ width: 13%; }}
+  .col-size     {{ width: 70px; }}
+  .col-apply    {{ width: 70px; }}
   tr:nth-child(even) td {{ background: #f5f7ff; }}
   .badge {{ display: inline-block; padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; }}
   .remote  {{ background: #d4f5d4; color: #1a6e1a; }}
@@ -386,7 +397,7 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
 <h1>Internship Postings &mdash; {date_str}</h1>
 <div class="summary">
   <strong>{total} new posting{"s" if total != 1 else ""}</strong> matched your filters across {len(jobs_by_cat)} categories.<br>
-  <span style="color:#555">Criteria: posted within last 24h &bull; Hire Time = Summer 2027 or unspecified &bull; On-site / Hybrid only &bull; Salary &ge; $35/hr &bull; Approved companies only</span>
+  <span style="color:#555">Criteria: posted within last 24h &bull; Hire Time = Summer 2027 or unspecified &bull; On-site / Hybrid only &bull; Salary &ge; $30/hr (or approved company) &bull; Approved companies only</span>
 </div>
 """
 
@@ -407,19 +418,16 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
         html += '<div class="table-wrap">\n'
         html += (
             "<table>\n<thead><tr>"
-            "<th>#</th>"
-            "<th>Position Title</th>"
-            "<th>Company</th>"
-            "<th>Date</th>"
-            "<th>Location</th>"
-            "<th>Work Model</th>"
-            "<th>Salary</th>"
-            "<th>Hire Time</th>"
-            "<th>Graduate Time</th>"
-            "<th>Company Industry</th>"
-            "<th>Company Size</th>"
-            "<th>Qualifications</th>"
-            "<th>Apply</th>"
+            '<th class="col-num">#</th>'
+            '<th class="col-title">Position Title</th>'
+            '<th class="col-company">Company</th>'
+            '<th class="col-location">Location</th>'
+            '<th class="col-model">Work Model</th>'
+            '<th class="col-salary">Salary</th>'
+            '<th class="col-hire">Hire Time</th>'
+            '<th class="col-industry">Industry</th>'
+            '<th class="col-size">Co. Size</th>'
+            '<th class="col-apply">Apply</th>'
             "</tr></thead>\n<tbody>\n"
         )
 
@@ -437,19 +445,16 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
             )
             html += (
                 f"<tr>"
-                f"<td>{i}</td>"
-                f"<td><strong>{j['title']}</strong></td>"
-                f"<td>{j['company']}</td>"
-                f"<td>{j['date']}</td>"
-                f"<td>{j['location']}</td>"
-                f"<td>{badge}</td>"
-                f"<td>{j['salary'] or '&mdash;'}</td>"
-                f"<td>{j['hire_time'] or '&mdash;'}</td>"
-                f"<td>{j['graduate_time'] or '&mdash;'}</td>"
-                f"<td>{j['company_industry'] or '&mdash;'}</td>"
-                f"<td>{j['company_size'] or '&mdash;'}</td>"
-                f"<td>{j['qualifications'] or '&mdash;'}</td>"
-                f"<td>{apply_cell}</td>"
+                f'<td class="col-num">{i}</td>'
+                f'<td class="col-title"><strong>{j["title"]}</strong></td>'
+                f'<td class="col-company">{j["company"]}</td>'
+                f'<td class="col-location">{j["location"]}</td>'
+                f'<td class="col-model">{badge}</td>'
+                f'<td class="col-salary">{j["salary"] or "&mdash;"}</td>'
+                f'<td class="col-hire">{j["hire_time"] or "&mdash;"}</td>'
+                f'<td class="col-industry">{j["company_industry"] or "&mdash;"}</td>'
+                f'<td class="col-size">{j["company_size"] or "&mdash;"}</td>'
+                f'<td class="col-apply">{apply_cell}</td>'
                 f"</tr>\n"
             )
 
