@@ -341,7 +341,7 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
 <style>
   body {{
     font-family: Arial, Helvetica, sans-serif;
-    max-width: 960px;
+    max-width: 900px;
     margin: 0 auto;
     padding: 28px 24px;
     color: #1a1a2e;
@@ -358,20 +358,31 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
     font-size: 14px;
   }}
   .table-wrap {{ margin-bottom: 20px; }}
-  table {{ width: 100%; border-collapse: collapse; font-size: 11px; table-layout: fixed; }}
-  th {{ background: #0f3460; color: #fff; padding: 7px 10px; text-align: left; font-weight: 600; white-space: nowrap; overflow: hidden; }}
-  td {{ padding: 6px 10px; border-bottom: 1px solid #e4e8f0; vertical-align: top; word-wrap: break-word; overflow-wrap: break-word; }}
+  table {{
+    border-collapse: collapse;
+    font-size: 11px;
+    table-layout: fixed;
+    width: 860px;
+  }}
+  th {{
+    background: #0f3460; color: #fff;
+    padding: 7px 8px; text-align: left; font-weight: 600;
+    white-space: nowrap; overflow: hidden;
+  }}
+  td {{
+    padding: 5px 8px; border-bottom: 1px solid #e4e8f0;
+    vertical-align: middle;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }}
   tr:nth-child(even) td {{ background: #f5f7ff; }}
-  .col-num      {{ width: 28px; }}
-  .col-title    {{ width: 20%; }}
-  .col-company  {{ width: 12%; }}
-  .col-location {{ width: 13%; }}
-  .col-model    {{ width: 80px; }}
-  .col-salary   {{ width: 10%; }}
-  .col-hire     {{ width: 90px; }}
-  .col-industry {{ width: 13%; }}
-  .col-size     {{ width: 70px; }}
-  .col-apply    {{ width: 70px; }}
+  .col-num      {{ width: 28px;  }}
+  .col-title    {{ width: 215px; }}
+  .col-company  {{ width: 130px; }}
+  .col-location {{ width: 130px; }}
+  .col-model    {{ width: 80px;  }}
+  .col-salary   {{ width: 100px; }}
+  .col-hire     {{ width: 87px;  }}
+  .col-apply    {{ width: 65px;  }}
   tr:nth-child(even) td {{ background: #f5f7ff; }}
   .badge {{ display: inline-block; padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; }}
   .remote  {{ background: #d4f5d4; color: #1a6e1a; }}
@@ -425,8 +436,6 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
             '<th class="col-model">Work Model</th>'
             '<th class="col-salary">Salary</th>'
             '<th class="col-hire">Hire Time</th>'
-            '<th class="col-industry">Industry</th>'
-            '<th class="col-size">Co. Size</th>'
             '<th class="col-apply">Apply</th>'
             "</tr></thead>\n<tbody>\n"
         )
@@ -452,8 +461,6 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
                 f'<td class="col-model">{badge}</td>'
                 f'<td class="col-salary">{j["salary"] or "&mdash;"}</td>'
                 f'<td class="col-hire">{j["hire_time"] or "&mdash;"}</td>'
-                f'<td class="col-industry">{j["company_industry"] or "&mdash;"}</td>'
-                f'<td class="col-size">{j["company_size"] or "&mdash;"}</td>'
                 f'<td class="col-apply">{apply_cell}</td>'
                 f"</tr>\n"
             )
