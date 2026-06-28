@@ -191,11 +191,15 @@ async def scrape_category(page: Page, url: str, name: str) -> list[dict]:
             if not is_valid_hire_time(hire_time):
                 continue
 
-            title      = await cell("position title", 1)
-            company    = await cell("company", 6)
-            location   = await cell("location", 5)
-            work_model = await cell("work model", 4)
-            salary     = await cell("salary", 7)
+            title            = await cell("position title", 1)
+            company          = await cell("company", 6)
+            location         = await cell("location", 5)
+            work_model       = await cell("work model", 4)
+            salary           = await cell("salary", 7)
+            graduate_time    = await cell("graduate time", 9)
+            company_industry = await cell("company industry", 10)
+            company_size     = await cell("company size", 11)
+            qualifications   = await cell("qualifications", 12)
 
             apply_link = ""
             apply_idx = col.get("apply", 3)
@@ -206,14 +210,18 @@ async def scrape_category(page: Page, url: str, name: str) -> list[dict]:
 
             if title:
                 jobs.append({
-                    "title":      title,
-                    "company":    company,
-                    "date":       date_str,
-                    "location":   location,
-                    "work_model": work_model,
-                    "salary":     salary,
-                    "hire_time":  hire_time,
-                    "apply_link": apply_link,
+                    "title":            title,
+                    "company":          company,
+                    "date":             date_str,
+                    "location":         location,
+                    "work_model":       work_model,
+                    "salary":           salary,
+                    "hire_time":        hire_time,
+                    "graduate_time":    graduate_time,
+                    "company_industry": company_industry,
+                    "company_size":     company_size,
+                    "qualifications":   qualifications,
+                    "apply_link":       apply_link,
                 })
 
         seen_count = len(await page.query_selector_all(row_sel))
@@ -235,6 +243,12 @@ async def scrape_category(page: Page, url: str, name: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Email
 # ---------------------------------------------------------------------------
+
+def salary_sort_key(job: dict) -> float:
+    """Extract the highest number from a salary string for descending sort. N/A → -1."""
+    nums = re.findall(r'[\d]+', job["salary"].replace(",", ""))
+    return max((float(n) for n in nums), default=-1)
+
 
 def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
     total = sum(len(v) for v in jobs_by_cat.values())
@@ -263,9 +277,10 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
     border-radius: 4px;
     font-size: 14px;
   }}
-  table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px; }}
-  th {{ background: #0f3460; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; }}
-  td {{ padding: 9px 14px; border-bottom: 1px solid #e4e8f0; vertical-align: middle; }}
+  .table-wrap {{ overflow-x: auto; margin-bottom: 20px; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 12px; white-space: nowrap; }}
+  th {{ background: #0f3460; color: #fff; padding: 9px 12px; text-align: left; font-weight: 600; white-space: nowrap; }}
+  td {{ padding: 8px 12px; border-bottom: 1px solid #e4e8f0; vertical-align: middle; }}
   tr:nth-child(even) td {{ background: #f5f7ff; }}
   .badge {{ display: inline-block; padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; }}
   .remote  {{ background: #d4f5d4; color: #1a6e1a; }}
@@ -307,14 +322,28 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
             html += '<p class="no-jobs">No postings matched the criteria for this category.</p>\n'
             continue
 
+        sorted_jobs = sorted(jobs, key=salary_sort_key, reverse=True)
+
+        html += '<div class="table-wrap">\n'
         html += (
             "<table>\n<thead><tr>"
-            "<th>#</th><th>Position Title</th><th>Company</th>"
-            "<th>Location</th><th>Work Model</th><th>Apply</th>"
+            "<th>#</th>"
+            "<th>Position Title</th>"
+            "<th>Company</th>"
+            "<th>Date</th>"
+            "<th>Location</th>"
+            "<th>Work Model</th>"
+            "<th>Salary</th>"
+            "<th>Hire Time</th>"
+            "<th>Graduate Time</th>"
+            "<th>Company Industry</th>"
+            "<th>Company Size</th>"
+            "<th>Qualifications</th>"
+            "<th>Apply</th>"
             "</tr></thead>\n<tbody>\n"
         )
 
-        for i, j in enumerate(jobs, 1):
+        for i, j in enumerate(sorted_jobs, 1):
             wm = j["work_model"].lower()
             cls = (
                 "remote" if "remote" in wm else
@@ -327,12 +356,24 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
                 if j["apply_link"] else "&mdash;"
             )
             html += (
-                f"<tr><td>{i}</td><td><strong>{j['title']}</strong></td>"
-                f"<td>{j['company']}</td><td>{j['location']}</td>"
-                f"<td>{badge}</td><td>{apply_cell}</td></tr>\n"
+                f"<tr>"
+                f"<td>{i}</td>"
+                f"<td><strong>{j['title']}</strong></td>"
+                f"<td>{j['company']}</td>"
+                f"<td>{j['date']}</td>"
+                f"<td>{j['location']}</td>"
+                f"<td>{badge}</td>"
+                f"<td>{j['salary'] or '&mdash;'}</td>"
+                f"<td>{j['hire_time'] or '&mdash;'}</td>"
+                f"<td>{j['graduate_time'] or '&mdash;'}</td>"
+                f"<td>{j['company_industry'] or '&mdash;'}</td>"
+                f"<td>{j['company_size'] or '&mdash;'}</td>"
+                f"<td>{j['qualifications'] or '&mdash;'}</td>"
+                f"<td>{apply_cell}</td>"
+                f"</tr>\n"
             )
 
-        html += "</tbody>\n</table>\n"
+        html += "</tbody>\n</table>\n</div>\n"
 
     html += (
         f'<div class="footer">'
