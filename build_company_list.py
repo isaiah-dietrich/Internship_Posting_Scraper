@@ -12,8 +12,6 @@ import asyncio
 import os
 import re
 
-import requests
-from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
 OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "data", "company_allowlist.txt")
@@ -92,34 +90,31 @@ CONSULTING_FALLBACK = [
 
 
 # ---------------------------------------------------------------------------
-# Source 1: Fortune 500 (Wikipedia — static HTML)
+# Source 1: Fortune 500 (local file — fortune5002026.txt)
 # ---------------------------------------------------------------------------
 
 def get_fortune_500() -> list[str]:
-    print("Fetching Fortune 500 from Wikipedia ...")
-    url = "https://en.wikipedia.org/wiki/Fortune_500"
-    try:
-        resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
-        resp.raise_for_status()
-    except Exception as e:
-        print(f"  ERROR: {e}")
+    """
+    Parse company names from fortune5002026.txt.
+    Format: rank line (digits + optional tab), then company name on next line,
+    then industry, then tab-separated financials.
+    """
+    path = os.path.join(os.path.dirname(__file__), "fortune5002026.txt")
+    if not os.path.exists(path):
+        print("  fortune5002026.txt not found — skipping Fortune 500")
         return []
 
-    soup = BeautifulSoup(resp.text, "html.parser")
     companies = []
+    lines = open(path, encoding="utf-8").readlines()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        # Rank lines are just a number (optionally followed by a tab)
+        if re.match(r"^\d+\t?$", stripped) and i + 1 < len(lines):
+            name = lines[i + 1].strip()
+            if name and not re.match(r"^\d", name):
+                companies.append(name)
 
-    for table in soup.find_all("table", class_="wikitable"):
-        for row in table.find_all("tr")[1:]:
-            cells = row.find_all(["td", "th"])
-            # Column layout: Rank | Name | Industry | Revenue | ...
-            if len(cells) >= 2:
-                name = cells[1].get_text(strip=True)
-                # Strip footnote markers like [1], [A]
-                name = re.sub(r"\[.*?\]", "", name).strip()
-                if name:
-                    companies.append(name)
-
-    print(f"  {len(companies)} companies")
+    print(f"  {len(companies)} companies from fortune5002026.txt")
     return companies
 
 
