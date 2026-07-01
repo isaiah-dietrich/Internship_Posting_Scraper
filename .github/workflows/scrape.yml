@@ -53,18 +53,12 @@ jobs:
 
       - name: Cache Playwright browsers
         uses: actions/cache@v4
-        id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('requirements.txt') }}
 
-      - name: Install Playwright + Chromium (cache miss)
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
+      - name: Install Playwright + Chromium
         run: playwright install chromium --with-deps
-
-      - name: Install Playwright system deps only (cache hit)
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: playwright install-deps chromium
 
       - name: Run scraper
         env:
@@ -73,6 +67,7 @@ jobs:
           RECIPIENT_EMAIL:    ${{ vars.RECIPIENT_EMAIL || 'ijdietrich@wisc.edu' }}
           DRY_RUN:            ${{ github.event.inputs.dry_run || 'false' }}
           DEBUG:              ${{ github.event.inputs.debug || 'false' }}
+          ENABLE_MC_ALERT:    'true'
         run: python scraper.py
 
       - name: Upload debug artifacts
@@ -83,4 +78,5 @@ jobs:
           path: |
             debug_*.png
             email_preview.html
+            mc_alert_preview.html
           retention-days: 7
