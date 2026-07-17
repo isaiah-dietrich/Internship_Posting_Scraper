@@ -1,0 +1,24 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Your networking message examples
+#
+# Paste 5-10 of your best past messages here, separated by "---" between each.
+# Claude will read these to match your voice when drafting new outreach.
+#
+# Include the full message (subject line if available, greeting, body, sign-off).
+# The more examples you provide, the better the drafts will be.
+# ──────────────────────────────────────────────────────────────────────────────
+
+--- EXAMPLE 1 ---
+[Paste your first networking message here]
+
+--- EXAMPLE 2 ---
+[Paste your second networking message here]
+
+--- EXAMPLE 3 ---
+[Paste your third networking message here]
+
+--- EXAMPLE 4 ---
+[Paste your fourth networking message here]
+
+--- EXAMPLE 5 ---
+[Paste your fifth networking message here]

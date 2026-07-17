@@ -2,9 +2,18 @@ name: Daily Internship Scraper
 
 on:
   schedule:
-    # 9:00 AM CDT (UTC-5, summer) = 14:00 UTC
-    # If you need 9:00 AM CST (UTC-6, winter) change to: '0 15 * * *'
-    - cron: '0 14 * * *'
+    # Two triggers cover both UTC offsets for ~9:05 AM US Central Time
+    # (CDT in summer, CST in winter). The "gate" job below checks the
+    # actual local hour and only lets the correct one proceed, so this
+    # no longer needs to be hand-edited when clocks change.
+    #
+    # Both are offset a few minutes past the hour on purpose: GitHub
+    # Actions queues scheduled runs, and jobs scheduled for exactly
+    # the top of the hour see the worst delays under load (GitHub's
+    # own docs call this out) — that's what was causing emails to
+    # arrive at "random" times up to ~2 hours late.
+    - cron: '5 14 * * *'   # ~9:05 AM CDT (UTC-5)
+    - cron: '5 15 * * *'   # ~9:05 AM CST (UTC-6)
 
   workflow_dispatch:
     inputs:
@@ -25,9 +34,35 @@ on:
           - 'false'
           - 'true'
 
+permissions:
+  contents: write
+
 jobs:
+  gate:
+    name: Check DST slot
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Only proceed on the matching local-time trigger
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          hour=$(TZ='America/Chicago' date +%H)
+          if [ "$hour" = "09" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Local Chicago hour is $hour, not 09 — this is the wrong-DST-offset trigger, skipping."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
   scrape:
     name: Scrape & Email Internship Postings
+    needs: gate
+    if: needs.gate.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -69,6 +104,15 @@ jobs:
           DEBUG:              ${{ github.event.inputs.debug || 'false' }}
           ENABLE_MC_ALERT:    'true'
         run: python scraper.py
+
+      - name: Commit updated sent-jobs log
+        if: ${{ success() && github.event.inputs.dry_run != 'true' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/sent_jobs.json
+          git diff --staged --quiet || git commit -m "chore: update sent-jobs log [skip ci]"
+          git push
 
       - name: Upload debug artifacts
         if: ${{ always() && github.event.inputs.debug == 'true' }}

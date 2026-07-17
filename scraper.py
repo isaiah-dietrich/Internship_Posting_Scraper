@@ -6,10 +6,11 @@ filters by posting date and hire time, and sends an HTML email digest.
 """
 
 import asyncio
+import json
 import os
 import re
 import smtplib
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -28,6 +29,8 @@ GMAIL_USER         = os.environ.get("GMAIL_USER", "")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 DRY_RUN            = os.environ.get("DRY_RUN", "false").lower() == "true"
 DEBUG              = os.environ.get("DEBUG", "false").lower() == "true"
+ENABLE_NETWORKER   = os.environ.get("ENABLE_NETWORKER", "false").lower() == "true"
+ENABLE_MC_ALERT    = os.environ.get("ENABLE_MC_ALERT", "false").lower() == "true"
 
 # ---------------------------------------------------------------------------
 # Company allowlist (fuzzy matching)
@@ -47,6 +50,78 @@ if _ALLOWLIST_ACTIVE:
     print(f"Company allowlist loaded: {len(COMPANY_ALLOWLIST)} companies")
 else:
     print("Company allowlist not found — company filter disabled")
+
+# ---------------------------------------------------------------------------
+# Sent-jobs log (cross-run dedup)
+# ---------------------------------------------------------------------------
+#
+# jobright.ai's "posted X ago" label is the only signal we have for freshness,
+# and it isn't reliable enough on its own: a posting sitting right at a "1 day
+# ago" boundary (or one whose label lags) can keep passing is_within_last_day()
+# for more than one run, which sends the same posting again in a later day's
+# email. To guarantee "each posting appears at most once," we keep a small
+# persisted log of postings we've already emailed and skip anything in it,
+# independent of what the site's timestamp says.
+
+SENT_JOBS_PATH = os.path.join(os.path.dirname(__file__), "data", "sent_jobs.json")
+SENT_JOBS_RETENTION_DAYS = 5  # prune entries older than this so the log doesn't grow forever
+
+
+def job_key(job: dict) -> str:
+    """Stable identity for a posting, independent of scrape-to-scrape noise
+    (e.g. tracking params in apply links)."""
+    return "|".join([
+        job["company"].strip().lower(),
+        job["title"].strip().lower(),
+        job["location"].strip().lower(),
+    ])
+
+
+def load_sent_jobs() -> dict[str, str]:
+    if not os.path.exists(SENT_JOBS_PATH):
+        return {}
+    try:
+        with open(SENT_JOBS_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_sent_jobs(sent: dict[str, str]) -> None:
+    os.makedirs(os.path.dirname(SENT_JOBS_PATH), exist_ok=True)
+    with open(SENT_JOBS_PATH, "w", encoding="utf-8") as f:
+        json.dump(sent, f, indent=2, sort_keys=True)
+
+
+def prune_sent_jobs(sent: dict[str, str], today: "datetime.date", retention_days: int = SENT_JOBS_RETENTION_DAYS) -> dict[str, str]:
+    cutoff = today - timedelta(days=retention_days)
+    pruned = {}
+    for key, seen_date_str in sent.items():
+        try:
+            seen_date = datetime.strptime(seen_date_str, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if seen_date >= cutoff:
+            pruned[key] = seen_date_str
+    return pruned
+
+
+# ---------------------------------------------------------------------------
+# MBA / Grad-program filter
+# ---------------------------------------------------------------------------
+#
+# Word-boundary regex so "Undergraduate"/"Undergrad" are NOT caught (the
+# boundary check fails inside those words since "grad"/"graduate" isn't
+# preceded by a non-word character), only standalone "MBA" / "Grad" /
+# "Graduate" mentions are.
+
+GRAD_MBA_RE = re.compile(r"\bmba\b|\bgrad(?:uate)?s?\b", re.IGNORECASE)
+
+
+def mentions_mba_or_grad(title: str, qualifications: str = "") -> bool:
+    """True if the posting targets MBA / graduate-program candidates."""
+    return bool(GRAD_MBA_RE.search(f"{title} {qualifications}"))
+
 
 # Ordered list of row selectors to try
 ROW_SELECTORS = [
@@ -274,12 +349,15 @@ async def scrape_category(page: Page, url: str, name: str) -> list[dict]:
             if not is_valid_hire_time(hire_time):
                 continue
 
-            title            = await cell("position title", 1)
+            title          = await cell("position title", 1)
+            qualifications = await cell("qualifications", 12)
+            if mentions_mba_or_grad(title, qualifications):
+                continue
+
             location         = await cell("location", 5)
             graduate_time    = await cell("graduate time", 9)
             company_industry = await cell("company industry", 10)
             company_size     = await cell("company size", 11)
-            qualifications   = await cell("qualifications", 12)
 
             apply_link = ""
             apply_idx = col.get("apply", 3)
@@ -407,7 +485,7 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
 <h1>Internship Postings &mdash; {date_str}</h1>
 <div class="summary">
   <strong>{total} new posting{"s" if total != 1 else ""}</strong> matched your filters across {len(jobs_by_cat)} categories.<br>
-  <span style="color:#555">Criteria: posted within last 24h &bull; Hire Time = Summer 2027 or unspecified &bull; On-site / Hybrid only &bull; Salary &ge; $30/hr (or approved company) &bull; Approved companies only</span>
+  <span style="color:#555">Criteria: posted within last 24h &bull; Hire Time = Summer 2027 or unspecified &bull; On-site / Hybrid only &bull; Salary &ge; $30/hr (or approved company) &bull; Approved companies only &bull; No MBA/Grad postings &bull; No repeats from prior emails</span>
 </div>
 """
 
@@ -474,13 +552,14 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
     return html
 
 
-def send_email(html: str, date_str: str) -> None:
+def send_email(html: str, date_str: str) -> bool:
+    """Returns True if a real email was sent, False if it only wrote a local preview."""
     if DRY_RUN or not GMAIL_USER or not GMAIL_APP_PASSWORD:
         out = "email_preview.html"
         with open(out, "w", encoding="utf-8") as f:
             f.write(html)
         print(f"\nDry run — email HTML saved to {out}")
-        return
+        return False
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"Internship Postings: {date_str}"
@@ -493,6 +572,7 @@ def send_email(html: str, date_str: str) -> None:
         smtp.sendmail(GMAIL_USER, RECIPIENT_EMAIL, msg.as_string())
 
     print(f"Email sent to {RECIPIENT_EMAIL}")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -500,7 +580,12 @@ def send_email(html: str, date_str: str) -> None:
 # ---------------------------------------------------------------------------
 
 async def main() -> None:
-    date_str = datetime.now().strftime("%B %d, %Y")
+    now = datetime.now()
+    date_str = now.strftime("%B %d, %Y")
+    today_iso = now.strftime("%Y-%m-%d")
+
+    sent_jobs = prune_sent_jobs(load_sent_jobs(), now.date())
+
     jobs_by_cat: dict[str, list[dict]] = {}
 
     async with async_playwright() as pw:
@@ -517,15 +602,40 @@ async def main() -> None:
         page = await ctx.new_page()
 
         for name, url in CATEGORIES.items():
-            jobs_by_cat[name] = await scrape_category(page, url, name)
+            scraped = await scrape_category(page, url, name)
+            deduped = [j for j in scraped if job_key(j) not in sent_jobs]
+            skipped = len(scraped) - len(deduped)
+            if skipped:
+                print(f"  ({skipped} already emailed in a previous run — skipped)")
+            jobs_by_cat[name] = deduped
+
+        if ENABLE_NETWORKER and sum(len(v) for v in jobs_by_cat.values()) > 0:
+            from networker import run_networker_for_jobs
+            await run_networker_for_jobs(jobs_by_cat, page)
 
         await browser.close()
+
+    if ENABLE_MC_ALERT:
+        from mc_alert import find_mc_matches, load_mc_firms, send_mc_alert
+        mc_firms = load_mc_firms()
+        print(f"\nMC alert: checking {len(mc_firms)} firms ...")
+        mc_matches = find_mc_matches(jobs_by_cat, mc_firms)
+        if mc_matches:
+            send_mc_alert(mc_matches, date_str, GMAIL_USER, GMAIL_APP_PASSWORD, RECIPIENT_EMAIL, DRY_RUN)
+        else:
+            print("MC alert: no matches found")
 
     total = sum(len(v) for v in jobs_by_cat.values())
     print(f"\nTotal matching postings: {total}")
 
     html = build_html(jobs_by_cat, date_str)
-    send_email(html, date_str)
+    email_sent = send_email(html, date_str)
+
+    if email_sent:
+        for jobs in jobs_by_cat.values():
+            for j in jobs:
+                sent_jobs[job_key(j)] = today_iso
+        save_sent_jobs(sent_jobs)
 
 
 if __name__ == "__main__":
