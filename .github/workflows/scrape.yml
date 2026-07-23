@@ -3,9 +3,10 @@ name: Daily Internship Scraper
 on:
   schedule:
     # Two triggers cover both UTC offsets for ~9:05 AM US Central Time
-    # (CDT in summer, CST in winter). The "gate" job below checks the
-    # actual local hour and only lets the correct one proceed, so this
-    # no longer needs to be hand-edited when clocks change.
+    # (CDT in summer, CST in winter). The "gate" job below checks which
+    # of the two crons actually fired against which one matches today's
+    # DST offset, so this no longer needs to be hand-edited when clocks
+    # change.
     #
     # Both are offset a few minutes past the hour on purpose: GitHub
     # Actions queues scheduled runs, and jobs scheduled for exactly
@@ -44,18 +45,27 @@ jobs:
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
     steps:
-      - name: Only proceed on the matching local-time trigger
+      - name: Only proceed on the matching DST-offset trigger
         id: check
         run: |
           if [ "${{ github.event_name }}" != "schedule" ]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          hour=$(TZ='America/Chicago' date +%H)
-          if [ "$hour" = "09" ]; then
+          # Which cron is "correct" depends only on today's date (DST
+          # status), not on when the delayed job happens to execute —
+          # GitHub Actions can queue scheduled runs a couple hours late,
+          # which made an execution-time hour check unreliable.
+          offset=$(TZ='America/Chicago' date +%z)
+          if [ "$offset" = "-0500" ]; then
+            correct_cron='5 14 * * *'
+          else
+            correct_cron='5 15 * * *'
+          fi
+          if [ "${{ github.event.schedule }}" = "$correct_cron" ]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Local Chicago hour is $hour, not 09 — this is the wrong-DST-offset trigger, skipping."
+            echo "Cron '${{ github.event.schedule }}' does not match today's DST offset ($offset, expected '$correct_cron') — this is the wrong-DST-offset trigger, skipping."
             echo "should_run=false" >> "$GITHUB_OUTPUT"
           fi
 
