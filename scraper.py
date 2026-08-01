@@ -142,51 +142,6 @@ def is_within_last_day(date_str: str) -> bool:
     return False
 
 
-def is_not_remote(work_model: str) -> bool:
-    """Returns False for purely remote jobs."""
-    return "remote" not in work_model.strip().lower()
-
-
-def meets_salary_threshold(salary: str) -> bool:
-    """
-    Thresholds: $30/hr | $5,000/mo | $1,250/wk | $60,000/yr
-    N/A / blank → True (include).  Unpaid → False.
-    """
-    s = salary.strip().lower()
-    if not s or s in ("n/a", "na", "-", "—", "tbd", "not specified"):
-        return True
-    if "unpaid" in s:
-        return False
-
-    nums = [float(n.replace(",", "")) for n in re.findall(r"[\d,]+(?:\.\d+)?", s)]
-    if not nums:
-        return True
-
-    max_val = max(nums)
-
-    is_hourly  = bool(re.search(r"/hr|/hour|\bhour\b|\bhourly\b", s))
-    is_monthly = bool(re.search(r"/mo(?:nth)?|\bmonth\b|\bmonthly\b", s))
-    is_weekly  = bool(re.search(r"/wk|/week|\bweek\b|\bweekly\b", s))
-    is_annual  = bool(re.search(r"/yr|/year|\byear\b|\bannual\b", s))
-
-    if is_hourly:
-        return max_val >= 30
-    elif is_monthly:
-        return max_val >= 5_000
-    elif is_weekly:
-        return max_val >= 1_250
-    elif is_annual:
-        return max_val >= 60_000
-    else:
-        # Guess from magnitude
-        if max_val < 500:
-            return max_val >= 30       # looks hourly
-        elif max_val < 8_000:
-            return max_val >= 5_000    # looks monthly
-        else:
-            return max_val >= 60_000   # looks annual
-
-
 def is_valid_hire_time(hire_time: str) -> bool:
     ht = hire_time.strip().lower()
     blank = ht in ("", "n/a", "na", "-", "—", "not specified", "tbd")
@@ -308,13 +263,8 @@ async def scrape_category(page: Page, url: str, name: str) -> list[dict]:
                 break
 
             work_model = await cell("work model", 4)
-            if not is_not_remote(work_model):
-                continue
-
-            salary  = await cell("salary", 7)
-            company = await cell("company", 6)
-            if not meets_salary_threshold(salary):
-                continue
+            salary     = await cell("salary", 7)
+            company    = await cell("company", 6)
 
             hire_time = await cell("hire time", 8)
             if not is_valid_hire_time(hire_time):
@@ -456,7 +406,7 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
 <h1>Internship Postings &mdash; {date_str}</h1>
 <div class="summary">
   <strong>{total} new posting{"s" if total != 1 else ""}</strong> matched your filters across {len(jobs_by_cat)} categories.<br>
-  <span style="color:#555">Criteria: posted within last 24h &bull; Hire Time = Summer 2027 or unspecified &bull; On-site / Hybrid only &bull; Salary &ge; $30/hr &bull; No MBA/Grad postings &bull; No repeats from prior emails</span>
+  <span style="color:#555">Criteria: posted within last 24h &bull; Hire Time = Summer 2027 or unspecified &bull; No MBA/Grad postings &bull; No repeats from prior emails &bull; No duplicates across categories</span>
 </div>
 """
 
@@ -572,12 +522,27 @@ async def main() -> None:
         await ctx.add_init_script(STEALTH_SCRIPT)
         page = await ctx.new_page()
 
+        seen_this_run: set[str] = set()
+
         for name, url in CATEGORIES.items():
             scraped = await scrape_category(page, url, name)
-            deduped = [j for j in scraped if job_key(j) not in sent_jobs]
-            skipped = len(scraped) - len(deduped)
-            if skipped:
-                print(f"  ({skipped} already emailed in a previous run — skipped)")
+            deduped = []
+            already_sent = 0
+            cross_category = 0
+            for j in scraped:
+                key = job_key(j)
+                if key in sent_jobs:
+                    already_sent += 1
+                    continue
+                if key in seen_this_run:
+                    cross_category += 1
+                    continue
+                seen_this_run.add(key)
+                deduped.append(j)
+            if already_sent:
+                print(f"  ({already_sent} already emailed in a previous run — skipped)")
+            if cross_category:
+                print(f"  ({cross_category} duplicate of a posting already placed in an earlier category — skipped)")
             jobs_by_cat[name] = deduped
 
         if ENABLE_NETWORKER and sum(len(v) for v in jobs_by_cat.values()) > 0:
