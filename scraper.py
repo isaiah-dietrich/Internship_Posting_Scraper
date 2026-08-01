@@ -15,7 +15,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from playwright.async_api import async_playwright, Page
-from rapidfuzz import process, fuzz
 
 CATEGORIES = {
     "Product Management": "https://jobright.ai/minisites-jobs/intern/us/product_management",
@@ -31,25 +30,6 @@ DRY_RUN            = os.environ.get("DRY_RUN", "false").lower() == "true"
 DEBUG              = os.environ.get("DEBUG", "false").lower() == "true"
 ENABLE_NETWORKER   = os.environ.get("ENABLE_NETWORKER", "false").lower() == "true"
 ENABLE_MC_ALERT    = os.environ.get("ENABLE_MC_ALERT", "false").lower() == "true"
-
-# ---------------------------------------------------------------------------
-# Company allowlist (fuzzy matching)
-# ---------------------------------------------------------------------------
-
-def _load_allowlist() -> list[str]:
-    path = os.path.join(os.path.dirname(__file__), "data", "company_allowlist.txt")
-    if not os.path.exists(path):
-        return []
-    with open(path, encoding="utf-8") as f:
-        return [ln.strip() for ln in f if ln.strip()]
-
-COMPANY_ALLOWLIST = _load_allowlist()
-_ALLOWLIST_ACTIVE = bool(COMPANY_ALLOWLIST)
-
-if _ALLOWLIST_ACTIVE:
-    print(f"Company allowlist loaded: {len(COMPANY_ALLOWLIST)} companies")
-else:
-    print("Company allowlist not found — company filter disabled")
 
 # ---------------------------------------------------------------------------
 # Sent-jobs log (cross-run dedup)
@@ -160,15 +140,6 @@ def is_within_last_day(date_str: str) -> bool:
     if m:
         return int(m.group(1)) < 1
     return False
-
-
-def is_approved_company(company: str, threshold: int = 82) -> bool:
-    """Return True if the company fuzzy-matches anything in the allowlist.
-    If the allowlist file doesn't exist, every company passes."""
-    if not _ALLOWLIST_ACTIVE or not company:
-        return not _ALLOWLIST_ACTIVE
-    result = process.extractOne(company, COMPANY_ALLOWLIST, scorer=fuzz.token_sort_ratio)
-    return result is not None and result[1] >= threshold
 
 
 def is_not_remote(work_model: str) -> bool:
@@ -342,7 +313,7 @@ async def scrape_category(page: Page, url: str, name: str) -> list[dict]:
 
             salary  = await cell("salary", 7)
             company = await cell("company", 6)
-            if not (meets_salary_threshold(salary) or is_approved_company(company)):
+            if not meets_salary_threshold(salary):
                 continue
 
             hire_time = await cell("hire time", 8)
@@ -485,7 +456,7 @@ def build_html(jobs_by_cat: dict[str, list[dict]], date_str: str) -> str:
 <h1>Internship Postings &mdash; {date_str}</h1>
 <div class="summary">
   <strong>{total} new posting{"s" if total != 1 else ""}</strong> matched your filters across {len(jobs_by_cat)} categories.<br>
-  <span style="color:#555">Criteria: posted within last 24h &bull; Hire Time = Summer 2027 or unspecified &bull; On-site / Hybrid only &bull; Salary &ge; $30/hr (or approved company) &bull; Approved companies only &bull; No MBA/Grad postings &bull; No repeats from prior emails</span>
+  <span style="color:#555">Criteria: posted within last 24h &bull; Hire Time = Summer 2027 or unspecified &bull; On-site / Hybrid only &bull; Salary &ge; $30/hr &bull; No MBA/Grad postings &bull; No repeats from prior emails</span>
 </div>
 """
 
