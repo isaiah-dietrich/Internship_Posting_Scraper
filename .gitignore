@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+
+# Generated / preview output
+email_preview.html
+mc_alert_preview.html
+debug_*.png
+
+# Tooling
+.playwright-mcp/
+.DS_Store
